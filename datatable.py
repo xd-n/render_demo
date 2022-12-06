@@ -1,148 +1,143 @@
-import pandas as pd
+from dash import Dash, html, dcc, Output, Input, dash_table, callback   # pip install dash
+import dash_bootstrap_components as dbc                                  # pip install dash-bootstrap-components
 import plotly.express as px
+import pandas as pd
+import numpy as np
 
-import dash
-import dash_table
-import dash_core_components as dcc
-import dash_html_components as html
-from dash.dependencies import Input, Output
-import dash_auth
-
-app = dash.Dash(__name__)
+app = Dash(__name__, external_stylesheets=[dbc.themes.LUMEN, dbc.icons.FONT_AWESOME])
 server = app.server
 
-auth = dash_auth.BasicAuth(
-    app,
-    {'bugsbunny': 'topsecret',
-     'pajaroloco': 'unsecreto'}
-)
+# our data
+df = pd.read_csv('https://raw.githubusercontent.com/Coding-with-Adam/Dash-by-Plotly/master/Analytic_Web_Apps/Flights_Analysis/europe-flights-reduced.csv')
+df['YEAR'] = df['YEAR'].astype(str)
 
-# ---------------------------------------------------------------
-# Taken from https://www.ecdc.europa.eu/en/geographical-distribution-2019-ncov-cases
-df = pd.read_csv("COVID-19-geographic-disbtribution-worldwide-2020-03-29.csv")
+# create datatable
+def create_table(data):
+    # pivot table
+    pbc = data.groupby(['GEO','PARTNER'])['Value'].sum().reset_index()
+    pbc = pbc.pivot(index='GEO', columns='PARTNER')['Value'].reset_index()
+    pbc = pbc[pbc['GEO'].isin(['Allemagne','Espagne','France','Grèce','Italie',
+                               'Pays-Bas','Portugal','Royaume-Uni','Suisse','Turquie'])]
 
-dff = df.groupby('countriesAndTerritories', as_index=False)[['deaths','cases']].sum()
-print(dff[:5])
-# ---------------------------------------------------------------
-app.layout = html.Div([
-    html.Div([
-        dash_table.DataTable(
-            id='datatable_id',
-            data=dff.to_dict('records'),
-            columns=[
-                {"name": i, "id": i, "deletable": False, "selectable": False} for i in dff.columns
-            ],
-            editable=False,
-            filter_action="native",
-            sort_action="native",
-            sort_mode="multi",
-            row_selectable="multi",
-            row_deletable=False,
-            selected_rows=[],
-            page_action="native",
-            page_current=0,
-            page_size=6,
-            # page_action='none',
-            # style_cell={
-            # 'whiteSpace': 'normal'
-            # },
-            # fixed_rows={ 'headers': True, 'data': 0 },
-            # virtualization=False,
-            style_cell_conditional=[
-                {'if': {'column_id': 'countriesAndTerritories'},
-                 'width': '40%', 'textAlign': 'left'},
-                {'if': {'column_id': 'deaths'},
-                 'width': '30%', 'textAlign': 'left'},
-                {'if': {'column_id': 'cases'},
-                 'width': '30%', 'textAlign': 'left'},
-            ],
-        ),
-    ],className='row'),
+    # add total values row and column
+    sums_col = pbc.select_dtypes(np.number).sum()
+    pbc = pd.concat([pbc, sums_col.to_frame().T], ignore_index=True)
+    pbc.at[10, 'GEO'] = 'Total'
 
-    html.Div([
-        html.Div([
-            dcc.Dropdown(id='linedropdown',
-                options=[
-                         {'label': 'Deaths', 'value': 'deaths'},
-                         {'label': 'Cases', 'value': 'cases'}
-                ],
-                value='deaths',
-                multi=False,
-                clearable=False
-            ),
-        ],className='six columns'),
+    sums_r = pbc.select_dtypes(np.number).sum(axis=1)
+    pbc['total'] = sums_r
 
-        html.Div([
-        dcc.Dropdown(id='piedropdown',
-            options=[
-                     {'label': 'Deaths', 'value': 'deaths'},
-                     {'label': 'Cases', 'value': 'cases'}
-            ],
-            value='cases',
-            multi=False,
-            clearable=False
-        ),
-        ],className='six columns'),
-
-    ],className='row'),
-
-    html.Div([
-        html.Div([
-            dcc.Graph(id='linechart'),
-        ],className='six columns'),
-
-        html.Div([
-            dcc.Graph(id='piechart'),
-        ],className='six columns'),
-
-    ],className='row'),
+    return dash_table.DataTable(
+        data=pbc.to_dict('records'),
+        fixed_columns={'headers': True, 'data': 1},
+        style_table={'minWidth': '100%'}
+    )
 
 
+app.layout = dbc.Container([
+    dbc.Row([
+        dbc.Col([
+            html.Span([
+                    html.I(className='fa-solid fa-plane-departure'),
+                " Number of Passangers between European countries 2019-2021 ",
+                html.I(className="fa-solid fa-plane-departure")], className='h2')
+    ], width=10)
+    ], justify='center', className='my-2'),
+
+    dbc.Row([
+        dbc.Col([html.Label('YEAR', className='bg-secondary')],width=2),
+        dbc.Col([html.Label('Number of passangers per Year', className='bg-secondary')], width={"size": 4, "offset": 1}),
+        dbc.Col([html.Label('Total passangers per Month', className='bg-secondary')], width={"size": 4, "offset": 1})
+    ]),
+
+    dbc.Row([
+        dbc.Col([
+            dcc.Dropdown(['2019', '2020', '2021'], multi=True, id='year_dpdn'),
+            html.Label('MONTH', className='bg-secondary'),
+            dcc.Dropdown([1,2,3,4,5,6,7,8,9,10,11,12], multi=True, id='month_dpdn'),
+            html.Label('GEO', className='bg-secondary'),
+            dcc.Dropdown([x for x in sorted(df['GEO'].unique())], multi=True, id='geo_dpdn'),
+            html.Label('PARTNER', className='bg-secondary'),
+            dcc.Dropdown([x for x in sorted(df['PARTNER'].unique())], multi=True, id='partner_dpdn'),
+            html.Label('Number of countries', className='bg-secondary'),
+            html.H1(id='num_country')
+        ], width=2),
+        dbc.Col([
+            dcc.Graph(id='hist', config={'displayModeBar':False})
+        ], width=4),
+        dbc.Col([
+            dcc.Graph(id='line', config={'displayModeBar':False})
+        ], width=6)
+    ]),
+
+    dbc.Row([
+        dbc.Col([html.Label("Number of Passengers Between Countries", className="align-middle")], width={"size": 6, "offset": 3})
+    ], className='bg-secondary'),
+
+    dbc.Row([
+        dbc.Col([
+            html.Div(id='my-table')
+        ], width=12)
+    ])
 ])
 
-# ------------------------------------------------------------------
-@app.callback(
-    [Output('piechart', 'figure'),
-     Output('linechart', 'figure')],
-    [Input('datatable_id', 'selected_rows'),
-     Input('piedropdown', 'value'),
-     Input('linedropdown', 'value')]
+@callback(
+    Output('hist', 'figure'),
+    Output('line', 'figure'),
+    Output('my-table', 'children'),
+    Output('num_country', 'children'),
+    Input('year_dpdn', 'value'),
+    Input('month_dpdn', 'value'),
+    Input('geo_dpdn', 'value'),
+    Input('partner_dpdn', 'value')
 )
-def update_data(chosen_rows,piedropval,linedropval):
-    if len(chosen_rows)==0:
-        df_filterd = dff[dff['countriesAndTerritories'].isin(['China','Iran','Spain','Italy'])]
-    else:
-        print(chosen_rows)
-        df_filterd = dff[dff.index.isin(chosen_rows)]
+def update_graphs(year_v, month_v, geo_v, partner_v):
+    dff = df.copy()
+    print(type(year_v))
 
-    pie_chart=px.pie(
-            data_frame=df_filterd,
-            names='countriesAndTerritories',
-            values=piedropval,
-            hole=.3,
-            labels={'countriesAndTerritories':'Countries'}
-            )
+    if any([year_v, month_v, geo_v, partner_v]):
+        if year_v is not None:
+            if len(year_v)>0:
+                dff = dff.query(f"YEAR == {year_v}")
+        if month_v is not None:
+            if len(month_v) > 0:
+                dff = dff.query(f"MONTH == {month_v}")
+        if geo_v is not None:
+            if len(geo_v)>0:
+                dff = dff.query(f"GEO == {geo_v}")
+                country_count = len(geo_v)
+        if geo_v is None or len(geo_v)==0:
+            country_count = 35
+        if partner_v is not None:
+            if len(partner_v) > 0:
+                dff = dff.query(f"PARTNER == {partner_v}")
+
+        psg_by_month = dff.groupby('MONTH')['Value'].sum().reset_index()
+        psg_by_month = psg_by_month.sort_values('Value',
+                                                ignore_index=True,
+                                                ascending=False)
+        fig_line = px.line(psg_by_month, x='MONTH', y='Value').update_xaxes(type='category').update_layout(margin=dict(l=10, r=10, t=10, b=10))
+
+        fig_hist = px.histogram(dff, x='YEAR', y='Value').update_layout(margin=dict(l=10, r=10, t=10, b=10))
+
+        table = create_table(dff)
+
+        return fig_hist, fig_line, table, country_count
+
+    if not any([year_v, month_v, geo_v, partner_v]):  # equivalent to if all are None...
+        psg_by_month = df.groupby('MONTH')['Value'].sum().reset_index()
+        psg_by_month = psg_by_month.sort_values('Value',
+                                                ignore_index=True,
+                                                ascending=False)
+        fig_line = px.line(psg_by_month, x='MONTH', y='Value').update_xaxes(type='category').update_layout(margin=dict(l=10, r=10, t=10, b=10))
+
+        fig_hist = px.histogram(dff, x='YEAR', y='Value').update_layout(margin=dict(l=10, r=10, t=10, b=10))
+
+        table = create_table(df)
 
 
-    # extract list of chosen countries
-    list_chosen_countries=df_filterd['countriesAndTerritories'].tolist()
-    # filter original df according to chosen countries
-    # because original df has all the complete dates
-    df_line = df[df['countriesAndTerritories'].isin(list_chosen_countries)]
-
-    line_chart = px.line(
-            data_frame=df_line,
-            x='dateRep',
-            y=linedropval,
-            color='countriesAndTerritories',
-            labels={'countriesAndTerritories':'Countries', 'dateRep':'date'},
-            )
-    line_chart.update_layout(uirevision='foo')
-
-    return pie_chart,line_chart
-
-# ------------------------------------------------------------------
+        return fig_hist, fig_line, table, df['GEO'].nunique()
 
 
-if __name__ == '__main__':
-    app.run_server(debug=True)
+if __name__=='__main__':
+    app.run(debug=True)
